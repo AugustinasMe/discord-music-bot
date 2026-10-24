@@ -1,5 +1,6 @@
 import os
 import asyncio
+import random
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -93,6 +94,45 @@ async def leave(ctx):
         queues[ctx.guild.id] = []
         await ctx.voice_client.disconnect()
 
+
+@bot.command()
+async def roll(ctx, kiekis: int = 2):
+    if kiekis < 2 or kiekis > 20:
+        await ctx.send("Pasirinkite skaičių nuo 2 iki 20.")
+        return
+
+    await ctx.send(
+        f"Rašykite {kiekis} dalykus, kiekvieną atskira žinute. "
+        "(Atšaukti: parašykite `atsaukti`)"
+    )
+
+    def check(m):
+        return m.author == ctx.author and m.channel == ctx.channel
+
+    dalykai = []
+    while len(dalykai) < kiekis:
+        try:
+            zinute = await bot.wait_for("message", check=check, timeout=60)
+        except asyncio.TimeoutError:
+            await ctx.send("Per ilgai laukiau, atšaukta.")
+            return
+        if zinute.content.lower() == "atsaukti":
+            await ctx.send("Atšaukta.")
+            return
+        dalykai.append(zinute.content)
+        await ctx.send(f"Gauta {len(dalykai)}/{kiekis}")
+
+    random.shuffle(dalykai)
+    eilute = "\n".join(f"{i}. {d}" for i, d in enumerate(dalykai, start=1))
+    await ctx.send("Atsitiktinė tvarka:\n" + eilute)
+
+
+@roll.error
+async def roll_error(ctx, error):
+    if isinstance(error, commands.BadArgument):
+        await ctx.send("Įrašykite skaičių, pvz., `!roll 5`")
+
+
 @bot.command(name="help")
 async def help_command(ctx):
     embed = discord.Embed(
@@ -104,8 +144,10 @@ async def help_command(ctx):
     embed.add_field(name="!pause", value="Sustabdo grojimą", inline=False)
     embed.add_field(name="!resume", value="Tęsia grojimą", inline=False)
     embed.add_field(name="!leave", value="Išvalo eilę ir botas išeina iš kanalo", inline=False)
+    embed.add_field(name="!roll <kiekis>", value="Įrašote nurodytą kiekį dalykų, o botas išrašo juos atsitiktine tvarka", inline=False)
     embed.add_field(name="!ping", value="Patikrina, ar botas veikia", inline=False)
     embed.add_field(name="!help", value="Parodo šį sąrašą", inline=False)
     await ctx.send(embed=embed)
+
 
 bot.run(TOKEN)
