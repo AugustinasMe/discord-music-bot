@@ -10,7 +10,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 YDL_OPTIONS = {
     "format": "bestaudio/best",
@@ -56,7 +56,7 @@ async def ping(ctx):
 @bot.command()
 async def play(ctx, *, query):
     if not ctx.author.voice:
-        await ctx.send("Pirmiausia prisijunkite prie balso kanalo.")
+        await ctx.send("Pirma prisijunk prie voice'o gaideli")
         return
     if not ctx.voice_client:
         await ctx.author.voice.channel.connect()
@@ -93,5 +93,19 @@ async def leave(ctx):
         queues[ctx.guild.id] = []
         await ctx.voice_client.disconnect()
 
+@bot.command(name="help")
+async def help_command(ctx):
+    embed = discord.Embed(
+        title="Muzikos boto komandos",
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(name="!play <daina arba nuoroda>", value="Groja dainą (YouTube paieška arba YouTube/SoundCloud nuoroda)", inline=False)
+    embed.add_field(name="!skip", value="Praleidžia dabartinę dainą", inline=False)
+    embed.add_field(name="!pause", value="Sustabdo grojimą", inline=False)
+    embed.add_field(name="!resume", value="Tęsia grojimą", inline=False)
+    embed.add_field(name="!leave", value="Išvalo eilę ir botas išeina iš kanalo", inline=False)
+    embed.add_field(name="!ping", value="Patikrina, ar botas veikia", inline=False)
+    embed.add_field(name="!help", value="Parodo šį sąrašą", inline=False)
+    await ctx.send(embed=embed)
 
 bot.run(TOKEN)
