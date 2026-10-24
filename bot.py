@@ -24,7 +24,9 @@ FFMPEG_OPTIONS = {
     "options": "-vn",
 }
 
-queues = {}  # kiekvieno serverio dainų eilė
+queues = {}   # kiekvieno serverio dainų eilė
+loops = {}    # ar ciklas įjungtas (kiekvienam serveriui)
+current = {}  # dabar grojanti daina (kiekvienam serveriui)
 
 
 def get_info(query):
@@ -36,12 +38,24 @@ def get_info(query):
 
 
 def play_next(ctx):
-    queue = queues.get(ctx.guild.id, [])
+    guild_id = ctx.guild.id
+    queue = queues.setdefault(guild_id, [])
+    repeat = False
+
+    # jei ciklas įjungtas, dabartinę dainą grąžiname į eilės pradžią
+    if loops.get(guild_id) and current.get(guild_id):
+        queue.insert(0, current[guild_id])
+        repeat = True
+
     if queue and ctx.voice_client:
         title, url = queue.pop(0)
+        current[guild_id] = (title, url)
         source = discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS)
         ctx.voice_client.play(source, after=lambda e: play_next(ctx))
-        asyncio.run_coroutine_threadsafe(ctx.send(f"Groja: {title}"), bot.loop)
+        if not repeat:
+            asyncio.run_coroutine_threadsafe(ctx.send(f"Groja: {title}"), bot.loop)
+    else:
+        current.pop(guild_id, None)
 
 
 @bot.event
@@ -73,6 +87,7 @@ async def play(ctx, *, query):
 @bot.command()
 async def skip(ctx):
     if ctx.voice_client:
+        current.pop(ctx.guild.id, None)  # kad praleista daina nesikartotų
         ctx.voice_client.stop()
 
 
@@ -89,9 +104,21 @@ async def resume(ctx):
 
 
 @bot.command()
+async def loop(ctx):
+    guild_id = ctx.guild.id
+    loops[guild_id] = not loops.get(guild_id, False)
+    if loops[guild_id]:
+        await ctx.send("🔁 Ciklas įjungtas: dabartinė daina kartosis.")
+    else:
+        await ctx.send("Ciklas išjungtas.")
+
+
+@bot.command()
 async def leave(ctx):
     if ctx.voice_client:
         queues[ctx.guild.id] = []
+        current.pop(ctx.guild.id, None)
+        loops[ctx.guild.id] = False
         await ctx.voice_client.disconnect()
 
 
@@ -166,6 +193,7 @@ async def help_command(ctx):
     embed.add_field(name="!skip", value="Praleidžia dabartinę dainą", inline=False)
     embed.add_field(name="!pause", value="Sustabdo grojimą", inline=False)
     embed.add_field(name="!resume", value="Tęsia grojimą", inline=False)
+    embed.add_field(name="!loop", value="Įjungia / išjungia dabartinės dainos kartojimą", inline=False)
     embed.add_field(name="!leave", value="Išvalo eilę ir botas išeina iš kanalo", inline=False)
     embed.add_field(name="!roll <kiekis>", value="Įrašote nurodytą kiekį dalykų, o botas išrašo juos atsitiktine tvarka", inline=False)
     embed.add_field(name="!clear <skaičius>", value="Ištrina nurodytą kiekį žinučių šiame kanale (reikia teisės trinti žinutes)", inline=False)
