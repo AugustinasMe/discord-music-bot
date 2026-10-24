@@ -133,6 +133,29 @@ async def roll_error(ctx, error):
         await ctx.send("Įrašykite skaičių, pvz., `!roll 5`")
 
 
+@bot.command()
+@commands.has_permissions(manage_messages=True)
+@commands.bot_has_permissions(manage_messages=True, read_message_history=True)
+async def clear(ctx, kiekis: int):
+    if kiekis < 1 or kiekis > 200:
+        await ctx.send("Pasirinkite skaičių nuo 1 iki 200.")
+        return
+    istrinta = await ctx.channel.purge(limit=kiekis + 1)
+    await ctx.send(f"Ištrinta žinučių: {len(istrinta) - 1}", delete_after=3)
+
+
+@clear.error
+async def clear_error(ctx, error):
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("Įrašykite skaičių, pvz., `!clear 10-200`")
+    elif isinstance(error, commands.BadArgument):
+        await ctx.send("Įrašykite skaičių, pvz., `!clear 10-200`")
+    elif isinstance(error, commands.MissingPermissions):
+        await ctx.send("Neturite teisės trinti žinučių.")
+    elif isinstance(error, commands.BotMissingPermissions):
+        await ctx.send("Botas neturi teisės trinti žinučių šiame kanale.")
+
+
 @bot.command(name="help")
 async def help_command(ctx):
     embed = discord.Embed(
@@ -145,6 +168,7 @@ async def help_command(ctx):
     embed.add_field(name="!resume", value="Tęsia grojimą", inline=False)
     embed.add_field(name="!leave", value="Išvalo eilę ir botas išeina iš kanalo", inline=False)
     embed.add_field(name="!roll <kiekis>", value="Įrašote nurodytą kiekį dalykų, o botas išrašo juos atsitiktine tvarka", inline=False)
+    embed.add_field(name="!clear <skaičius>", value="Ištrina nurodytą kiekį žinučių šiame kanale (reikia teisės trinti žinutes)", inline=False)
     embed.add_field(name="!ping", value="Patikrina, ar botas veikia", inline=False)
     embed.add_field(name="!help", value="Parodo šį sąrašą", inline=False)
     await ctx.send(embed=embed)
