@@ -5,9 +5,23 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 import yt_dlp
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
+SPOTIFY_ID = os.getenv("SPOTIFY_CLIENT_ID")
+SPOTIFY_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
+
+# Spotify prisijungimas (jei raktai nenurodyti, Spotify tiesiog neveiks)
+sp = None
+if SPOTIFY_ID and SPOTIFY_SECRET:
+    sp = spotipy.Spotify(
+        auth_manager=SpotifyClientCredentials(
+            client_id=SPOTIFY_ID,
+            client_secret=SPOTIFY_SECRET,
+        )
+    )
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -24,6 +38,8 @@ FFMPEG_OPTIONS = {
     "options": "-vn",
 }
 
+MAX_SPOTIFY_TRACKS = 50  # kiek dainų daugiausiai įdedam iš albumo
+
 queues = {}   # kiekvieno serverio dainų eilė
 loops = {}    # ar ciklas įjungtas (kiekvienam serveriui)
 current = {}  # dabar grojanti daina (kiekvienam serveriui)
@@ -35,6 +51,29 @@ def get_info(query):
         if "entries" in info:
             info = info["entries"][0]
         return info["title"], info["url"]
+
+
+def track_to_text(track):
+    """Iš Spotify dainos padaro paieškos tekstą: 'Daina Atlikėjas'."""
+    return f"{track['name']} {track['artists'][0]['name']}"
+
+
+def spotify_to_songs(link):
+    """Iš Spotify nuorodos (daina / albumas / grojaraštis) grąžina paieškos tekstų sąrašą."""
+    songs = []
+    if "/track/" in link:
+        songs.append(track_to_text(sp.track(link)))
+    elif "/album/" in link:
+        result = sp.album_tracks(link, limit=MAX_SPOTIFY_TRACKS)
+        for track in result["items"]:
+            songs.append(track_to_text(track))
+    elif "/playlist/" in link:
+        result = sp.playlist_items(link, limit=MAX_SPOTIFY_TRACKS)
+        for item in result["items"]:
+            track = item.get("track")
+            if track:
+                songs.append(track_to_text(track))
+    return songs
 
 
 def play_next(ctx):
@@ -49,6 +88,19 @@ def play_next(ctx):
 
     if queue and ctx.voice_client:
         title, url = queue.pop(0)
+
+        # Spotify dainos YouTube'e ieškomos tik dabar, kai ateina jų eilė
+        if url is None:
+            try:
+                title, url = get_info(title)
+            except Exception:
+                asyncio.run_coroutine_threadsafe(
+                    ctx.send(f"Nepavyko rasti: {title}"), bot.loop
+                )
+                current.pop(guild_id, None)
+                play_next(ctx)
+                return
+
         current[guild_id] = (title, url)
         source = discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS)
         ctx.voice_client.play(source, after=lambda e: play_next(ctx))
@@ -75,12 +127,44 @@ async def play(ctx, *, query):
         return
     if not ctx.voice_client:
         await ctx.author.voice.channel.connect()
-    async with ctx.typing():
-        title, url = await bot.loop.run_in_executor(None, get_info, query)
-    queues.setdefault(ctx.guild.id, []).append((title, url))
-    if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
-        await ctx.send(f"Įdėta į eilę: {title}")
+
+    queue = queues.setdefault(ctx.guild.id, [])
+    already_playing = ctx.voice_client.is_playing() or ctx.voice_client.is_paused()
+
+    if "open.spotify.com" in query:
+        if sp is None:
+            await ctx.send("Spotify nesukonfigūruotas: .env faile trūksta Spotify raktų.")
+            return
+        async with ctx.typing():
+            try:
+                songs = await bot.loop.run_in_executor(None, spotify_to_songs, query)
+            except Exception as e:
+                if "/playlist/" in query:
+                    await ctx.send(
+                        "Spotify nebeleidžia botam skaityti grojaraščių. "
+                        "Įdėk atskiros dainos arba albumo nuorodą."
+                    )
+                else:
+                    await ctx.send(f"Nepavyko perskaityti Spotify nuorodos: {e}")
+                return
+        if not songs:
+            await ctx.send("Nepavyko rasti dainų šioje Spotify nuorodoje.")
+            return
+        for song in songs:
+            queue.append((song, None))  # None = YouTube nuorodos dar neieškota
+        await ctx.send(f"Įdėta į eilę dainų iš Spotify: {len(songs)}")
     else:
+        async with ctx.typing():
+            try:
+                title, url = await bot.loop.run_in_executor(None, get_info, query)
+            except Exception:
+                await ctx.send("Nepavyko rasti arba paleisti šios dainos.")
+                return
+        queue.append((title, url))
+        if already_playing:
+            await ctx.send(f"Įdėta į eilę: {title}")
+
+    if not already_playing:
         play_next(ctx)
 
 
@@ -189,7 +273,7 @@ async def help_command(ctx):
         title="Muzikos boto komandos",
         color=discord.Color.blurple(),
     )
-    embed.add_field(name="!play <daina arba nuoroda>", value="Groja dainą (YouTube paieška arba YouTube/SoundCloud nuoroda)", inline=False)
+    embed.add_field(name="!play <daina arba nuoroda>", value="Groja dainą (YouTube paieška, YouTube/SoundCloud arba Spotify daina / albumas)", inline=False)
     embed.add_field(name="!skip", value="Praleidžia dabartinę dainą", inline=False)
     embed.add_field(name="!pause", value="Sustabdo grojimą", inline=False)
     embed.add_field(name="!resume", value="Tęsia grojimą", inline=False)
